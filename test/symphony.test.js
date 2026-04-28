@@ -11,11 +11,13 @@ const {
 	WorkspaceManager,
 	estimateTokenUsageFromText,
 	extractTokenUsage,
+	classifyLifecycleState,
 	loadConfig,
 	loadLocalEnv,
 	normalizeIssue,
 	parseCodexJsonEvent,
 	parseEnvFile,
+	renderDashboard,
 	renderWorkpadComment,
 	renderPrompt,
 	validateDispatchConfig
@@ -214,6 +216,40 @@ test("renders a durable workpad comment body", () => {
 	assert.match(body, /## Codex Workpad/);
 	assert.match(body, /TASK-1 - Wire it/);
 	assert.match(body, /Tokens observed: 5 total/);
+});
+
+test("classifies lifecycle states and renders the dashboard", () => {
+	const config = {
+		lifecycle: {
+			todo_states: ["Todo"],
+			in_progress_states: ["In Progress"],
+			human_review_states: ["Human Review"],
+			rework_states: ["Rework"],
+			merging_states: ["Merging"],
+			done_states: ["Done"]
+		}
+	};
+	const snapshot = {
+		generated_at: "2026-01-01T00:00:00.000Z",
+		counts: { running: 1, retrying: 0 },
+		running: [
+			{
+				issue_identifier: "TASK-1",
+				state: "In Progress",
+				lifecycle: "in_progress",
+				last_event: "agent_output",
+				tokens: { total_tokens: 42 },
+				workspace: { path: "/tmp/workspace" }
+			}
+		],
+		retrying: [],
+		codex_totals: { total_tokens: 42, seconds_running: 7 }
+	};
+
+	assert.equal(classifyLifecycleState(config, "Human Review"), "human_review");
+	assert.equal(classifyLifecycleState(config, null, "retrying"), "rework");
+	assert.match(renderDashboard(snapshot), /Codex Symphony/);
+	assert.match(renderDashboard(snapshot), /TASK-1/);
 });
 
 test("parses Codex token events and estimates running output activity", () => {

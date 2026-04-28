@@ -9,6 +9,7 @@ It does the boring orchestration work:
 - Runs `codex exec` with a rendered issue prompt.
 - Streams child-agent output into `agent-run.log`.
 - Tracks running/retry state through a local JSON API.
+- Serves a local dashboard for running, retrying, lifecycle, and token activity.
 - Optionally moves Linear tickets to `In Progress` and `In Review`.
 - Maintains one persistent `## Codex Workpad` Linear comment per issue.
 - Creates/reuses git worktrees and leaves PRs ready for human merge.
@@ -71,6 +72,7 @@ npm run serve
 
 The server prints a local URL. Visit:
 
+- `/` for the dashboard.
 - `/api/v1/state` for all running/retry state.
 - `/api/v1/<issue_identifier>` for one ticket.
 - `/api/v1/refresh` with `POST` to trigger a poll.
@@ -108,6 +110,8 @@ Recommended target repo files:
 - `scripts/agent-workflow.js`: validates and prints the workflow contract.
 
 See `docs/WORKFLOW_CONTRACT.md` and `templates/` for starter files.
+See `docs/CODEX_APP_SERVER.md` for why `codex exec --json` is the default
+transport and when app-server is worth adding.
 
 ## Ticket Template
 
@@ -158,3 +162,17 @@ npm run validate
 ```
 
 The test suite uses Node's built-in test runner and does not require external services.
+
+Optional live Linear E2E:
+
+```bash
+LINEAR_API_KEY=... \
+LINEAR_E2E_TEAM_ID=... \
+LINEAR_E2E_PROJECT_ID=... \
+LINEAR_E2E_PROJECT_SLUG=... \
+LINEAR_E2E_TARGET_REPO_ROOT=~/github.com/acme/my-service \
+npm run test:e2e:linear
+```
+
+Set `LINEAR_E2E_RUN_CODEX=true` to run a real Codex child process instead of a
+dry-run dispatch.

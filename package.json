@@ -11,7 +11,8 @@
     "config": "node scripts/symphony.js config",
     "once": "node scripts/symphony.js once",
     "serve": "node scripts/symphony.js serve",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "test:e2e:linear": "node scripts/e2e-linear-live.js"
   },
   "engines": {
     "node": ">=20"

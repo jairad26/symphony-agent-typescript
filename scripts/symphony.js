@@ -39,6 +39,14 @@ const DEFAULTS = {
 		max_retry_backoff_ms: 300000,
 		max_concurrent_agents_by_state: {}
 	},
+	lifecycle: {
+		todo_states: ["Todo"],
+		in_progress_states: ["In Progress"],
+		human_review_states: ["Human Review", "In Review"],
+		rework_states: ["Rework"],
+		merging_states: ["Merging"],
+		done_states: ["Done", "Closed"]
+	},
 	codex: {
 		command: "codex app-server",
 		turn_timeout_ms: 3600000,
@@ -638,6 +646,7 @@ class AgentRunner {
 	constructor(config, logger = () => {}) {
 		this.config = config;
 		this.logger = logger;
+		this.children = new Set();
 	}
 
 	pipeChildOutput(stream, { logStream, sessionId, streamName, onEvent }) {
@@ -712,6 +721,7 @@ class AgentRunner {
 				},
 				stdio: ["ignore", "pipe", "pipe"]
 			});
+			this.children.add(child);
 			onEvent({ event: "agent_process_started", session_id: sessionId, timestamp: new Date().toISOString(), pid: child.pid, log_file: runLogFile });
 			this.pipeChildOutput(child.stdout, { logStream, sessionId, streamName: "stdout", onEvent });
 			this.pipeChildOutput(child.stderr, { logStream, sessionId, streamName: "stderr", onEvent });
@@ -721,11 +731,13 @@ class AgentRunner {
 				reject(Object.assign(new Error("agent turn timed out"), { status: "TimedOut" }));
 			}, this.config.codex.turn_timeout_ms || DEFAULTS.codex.turn_timeout_ms);
 			child.on("error", (error) => {
+				this.children.delete(child);
 				clearTimeout(timeout);
 				logStream.end();
 				reject(Object.assign(error, { status: "Failed" }));
 			});
 			child.on("exit", (code) => {
+				this.children.delete(child);
 				clearTimeout(timeout);
 				logStream.end();
 				if (code === 0) {
@@ -737,6 +749,14 @@ class AgentRunner {
 		});
 		onEvent({ event: "turn_completed", session_id: sessionId, timestamp: new Date().toISOString() });
 		return { status: "Succeeded", session_id: sessionId, turns: 1 };
+	}
+
+	terminateAll(signal = "SIGTERM") {
+		for (const child of this.children) {
+			if (!child.killed) {
+				child.kill(signal);
+			}
+		}
 	}
 }
 
@@ -754,6 +774,19 @@ function sortCandidates(issues) {
 		}
 		return String(left.identifier).localeCompare(String(right.identifier));
 	});
+}
+
+function classifyLifecycleState(config, state, status = null) {
+	const lifecycle = config.lifecycle || DEFAULTS.lifecycle;
+	const stateName = String(state || "");
+	if (status === "retrying") return "rework";
+	if ((lifecycle.done_states || []).includes(stateName)) return "done";
+	if ((lifecycle.merging_states || []).includes(stateName)) return "merging";
+	if ((lifecycle.rework_states || []).includes(stateName)) return "rework";
+	if ((lifecycle.human_review_states || []).includes(stateName)) return "human_review";
+	if ((lifecycle.in_progress_states || []).includes(stateName)) return "in_progress";
+	if ((lifecycle.todo_states || []).includes(stateName)) return "todo";
+	return status || "observed";
 }
 
 class SymphonyOrchestrator {
@@ -1137,6 +1170,7 @@ class SymphonyOrchestrator {
 			issue_id: entry.issue.id,
 			issue_identifier: entry.issue.identifier,
 			state: entry.issue.state,
+			lifecycle: classifyLifecycleState(this.config, entry.issue.state, "running"),
 			session_id: entry.session_id,
 			turn_count: entry.turn_count,
 			last_event: entry.last_event,
@@ -1150,6 +1184,7 @@ class SymphonyOrchestrator {
 			issue_id: retry.issue_id,
 			issue_identifier: retry.identifier,
 			attempt: retry.attempt,
+			lifecycle: classifyLifecycleState(this.config, null, "retrying"),
 			due_at: retry.due_at,
 			error: retry.error
 		}));
@@ -1157,6 +1192,7 @@ class SymphonyOrchestrator {
 		return {
 			generated_at: new Date(now).toISOString(),
 			counts: { running: running.length, retrying: retrying.length },
+			lifecycle_counts: countBy([...running, ...retrying], "lifecycle"),
 			running,
 			retrying,
 			codex_totals: { ...this.codexTotals, seconds_running: this.codexTotals.seconds_running + activeSeconds },
@@ -1180,6 +1216,7 @@ class SymphonyOrchestrator {
 			issue_identifier: issueIdentifier,
 			issue_id: running?.issue.id || retry?.issue_id || recentEvents[0]?.issue_id || null,
 			status: running ? "running" : retry ? "retrying" : "observed",
+			lifecycle: running ? classifyLifecycleState(this.config, running.issue.state, "running") : retry ? "rework" : "observed",
 			workspace: running?.workspace || null,
 			attempts: {
 				current_retry_attempt: retry?.attempt || null
@@ -1221,6 +1258,14 @@ function extractTokenUsage(usage) {
 	};
 }
 
+function countBy(items, key) {
+	return items.reduce((counts, item) => {
+		const value = item[key] || "unknown";
+		counts[value] = (counts[value] || 0) + 1;
+		return counts;
+	}, {});
+}
+
 function renderWorkpadComment({ marker, issue, entry, status, note = "", generatedAt }) {
 	const workspacePath = entry.workspace?.path || "not created yet";
 	const tokens = entry.tokens || { input_tokens: 0, output_tokens: 0, total_tokens: 0 };
@@ -1257,6 +1302,76 @@ function renderWorkpadComment({ marker, issue, entry, status, note = "", generat
 - Tokens observed: ${tokens.total_tokens} total (${tokens.input_tokens} input, ${tokens.output_tokens} output).
 ${note ? `- Latest note: ${note}` : "- Latest note: none"}
 `;
+}
+
+function renderDashboard(snapshot) {
+	const runningRows = snapshot.running
+		.map(
+			(issue) => `<tr>
+<td><a href="/api/v1/${encodeURIComponent(issue.issue_identifier)}">${escapeHtml(issue.issue_identifier)}</a></td>
+<td>${escapeHtml(issue.state)}</td>
+<td><span class="pill">${escapeHtml(issue.lifecycle)}</span></td>
+<td>${escapeHtml(issue.last_event || "")}</td>
+<td>${Math.round(issue.tokens?.total_tokens || 0).toLocaleString()}</td>
+<td>${escapeHtml(issue.workspace?.path || "")}</td>
+</tr>`
+		)
+		.join("");
+	const retryRows = snapshot.retrying
+		.map(
+			(issue) => `<tr>
+<td>${escapeHtml(issue.issue_identifier)}</td>
+<td><span class="pill warn">${escapeHtml(issue.lifecycle)}</span></td>
+<td>${issue.attempt}</td>
+<td>${escapeHtml(issue.due_at)}</td>
+<td>${escapeHtml(issue.error || "")}</td>
+</tr>`
+		)
+		.join("");
+	return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="10">
+<title>Codex Symphony</title>
+<style>
+:root { color-scheme: light dark; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+body { margin: 0; background: Canvas; color: CanvasText; }
+main { max-width: 1180px; margin: 0 auto; padding: 28px; }
+h1 { margin: 0 0 6px; font-size: 28px; }
+h2 { margin-top: 28px; font-size: 18px; }
+.muted { color: color-mix(in srgb, CanvasText 62%, Canvas); }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin: 20px 0; }
+.metric { border: 1px solid color-mix(in srgb, CanvasText 15%, Canvas); border-radius: 8px; padding: 14px; }
+.metric strong { display: block; font-size: 26px; }
+.pill { display: inline-block; padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, #3b82f6 18%, Canvas); }
+.warn { background: color-mix(in srgb, #f59e0b 24%, Canvas); }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 10px; border-bottom: 1px solid color-mix(in srgb, CanvasText 12%, Canvas); vertical-align: top; }
+code, pre { white-space: pre-wrap; }
+a { color: #2563eb; }
+</style>
+</head>
+<body>
+<main>
+<h1>Codex Symphony</h1>
+<div class="muted">Generated ${escapeHtml(snapshot.generated_at)}. Auto-refreshes every 10 seconds.</div>
+<section class="grid">
+<div class="metric"><span>Running</span><strong>${snapshot.counts.running}</strong></div>
+<div class="metric"><span>Retrying</span><strong>${snapshot.counts.retrying}</strong></div>
+<div class="metric"><span>Observed Tokens</span><strong>${Math.round(snapshot.codex_totals.total_tokens || 0).toLocaleString()}</strong></div>
+<div class="metric"><span>Seconds Running</span><strong>${Math.round(snapshot.codex_totals.seconds_running || 0).toLocaleString()}</strong></div>
+</section>
+<h2>Running</h2>
+<table><thead><tr><th>Issue</th><th>Linear State</th><th>Lifecycle</th><th>Last Event</th><th>Tokens</th><th>Workspace</th></tr></thead><tbody>${runningRows || '<tr><td colspan="6" class="muted">No running issues.</td></tr>'}</tbody></table>
+<h2>Retrying</h2>
+<table><thead><tr><th>Issue</th><th>Lifecycle</th><th>Attempt</th><th>Due</th><th>Error</th></tr></thead><tbody>${retryRows || '<tr><td colspan="5" class="muted">No retries scheduled.</td></tr>'}</tbody></table>
+<h2>Raw State</h2>
+<pre>${escapeHtml(JSON.stringify(snapshot, null, 2))}</pre>
+</main>
+</body>
+</html>`;
 }
 
 function estimateTokenUsageFromText(text) {
@@ -1449,7 +1564,7 @@ async function main(argv = process.argv.slice(2)) {
 			}
 			if (request.method === "GET" && url.pathname === "/") {
 				response.setHeader("content-type", "text/html; charset=utf-8");
-				response.end(`<html><body><pre>${escapeHtml(JSON.stringify(runtime.snapshot(), null, 2))}</pre></body></html>`);
+				response.end(renderDashboard(runtime.snapshot()));
 				return;
 			}
 			response.statusCode = 404;
@@ -1461,6 +1576,18 @@ async function main(argv = process.argv.slice(2)) {
 			console.log(`Symphony server listening on http://127.0.0.1:${address.port}`);
 			schedulePollLoop();
 		});
+		const shutdown = (signal) => {
+			runtime.log("server_shutdown", { signal });
+			if (pollTimer) {
+				clearInterval(pollTimer);
+			}
+			fs.unwatchFile(workflowPath);
+			runtime.runner.terminateAll(signal === "SIGINT" ? "SIGINT" : "SIGTERM");
+			server.close(() => process.exit(0));
+			setTimeout(() => process.exit(0), 5000).unref();
+		};
+		process.once("SIGINT", () => shutdown("SIGINT"));
+		process.once("SIGTERM", () => shutdown("SIGTERM"));
 		return;
 	}
 
@@ -1492,6 +1619,8 @@ module.exports = {
 	parseFrontMatterYaml,
 	parseCodexJsonEvent,
 	renderWorkpadComment,
+	renderDashboard,
+	classifyLifecycleState,
 	estimateTokenUsageFromText,
 	readWorkflowFile,
 	renderPrompt,

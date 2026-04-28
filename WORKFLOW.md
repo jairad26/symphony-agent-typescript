@@ -31,6 +31,13 @@ agent:
   max_retry_backoff_ms: 300000
   max_concurrent_agents_by_state:
     Todo: 3
+lifecycle:
+  todo_states: ["Todo"]
+  in_progress_states: ["In Progress"]
+  human_review_states: ["Human Review", "In Review"]
+  rework_states: ["Rework"]
+  merging_states: ["Merging"]
+  done_states: ["Done", "Closed"]
 codex:
   command: bash "$SYMPHONY_HOME/scripts/symphony-codex-run.sh"
   approval_policy: never

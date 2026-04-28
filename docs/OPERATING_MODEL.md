@@ -26,6 +26,19 @@ Symphony knows what it directly observes:
 - Workpad comment id and latest workpad update status.
 - PR URL when the wrapper can read one with `gh`.
 
+## Runtime Supervision
+
+The Node implementation does not use Elixir/OTP. Instead it provides a small
+supervision layer around child processes:
+
+- child `codex exec` processes are tracked by the runner
+- turn timeouts terminate stuck children
+- `SIGINT`/`SIGTERM` shut down polling and terminate active children
+- active Linear issues are reconciled and retried on restart
+
+This is not a BEAM supervision tree, but it covers the practical local failure
+modes for the standalone harness.
+
 Symphony does not claim merge completion unless you add a separate merge monitor. That is intentional; PR-opened and merged are different facts.
 
 ## Recommended Rollout
