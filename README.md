@@ -85,6 +85,8 @@ The server prints a local URL. Visit:
 - Loads `.env.local` without overriding existing environment variables.
 - Queries Linear for active issues.
 - Applies assignment, state, blocker, concurrency, and retry rules.
+- Pulls recent Linear comments into the prompt, preferring comments added after
+  the last Symphony workpad update.
 - Creates or updates the issue's persistent `## Codex Workpad` comment.
 - Creates a per-issue workspace under `workspace.root`.
 - Renders the prompt with `{{ issue.* }}` variables.

@@ -327,8 +327,63 @@ function normalizeIssue(issue) {
 		assignee,
 		labels: Array.isArray(labels) ? labels.map((label) => String(label).toLowerCase()) : [],
 		blocked_by: Array.isArray(blockedBy) ? blockedBy : [],
+		comments: Array.isArray(issue.comments) ? issue.comments : [],
+		recent_comments: issue.recent_comments || "",
 		raw: issue
 	};
+}
+
+function normalizeIssueComment(comment) {
+	const author = comment.user || comment.author || null;
+	return {
+		id: comment.id,
+		body: String(comment.body || "").trim(),
+		created_at: comment.created_at || comment.createdAt || null,
+		updated_at: comment.updated_at || comment.updatedAt || null,
+		author: author
+			? {
+					name: author.name || null,
+					email: author.email || null
+				}
+			: null
+	};
+}
+
+function isWorkpadComment(comment, marker) {
+	const body = String(comment.body || "");
+	return body.includes(marker) || body.includes("## Codex Workpad");
+}
+
+function selectPromptComments(comments, marker) {
+	const normalized = comments.map(normalizeIssueComment).filter((comment) => comment.body && !isWorkpadComment(comment, marker));
+	const workpad = comments.map(normalizeIssueComment).filter((comment) => isWorkpadComment(comment, marker)).sort(compareCommentTime).at(-1);
+	if (!workpad?.updated_at) {
+		return normalized.slice(-10);
+	}
+	const cutoff = Date.parse(workpad.updated_at) || 0;
+	return normalized.filter((comment) => {
+		const timestamp = Date.parse(comment.updated_at || comment.created_at || "") || 0;
+		return timestamp > cutoff;
+	}).slice(-10);
+}
+
+function compareCommentTime(left, right) {
+	const leftTime = Date.parse(left.updated_at || left.created_at || "") || 0;
+	const rightTime = Date.parse(right.updated_at || right.created_at || "") || 0;
+	return leftTime - rightTime;
+}
+
+function formatPromptComments(comments) {
+	if (!comments.length) {
+		return "No new Linear comments since the last Symphony workpad update.";
+	}
+	return comments
+		.map((comment, index) => {
+			const author = comment.author?.name || comment.author?.email || "Unknown";
+			const timestamp = comment.updated_at || comment.created_at || "unknown time";
+			return `Comment ${index + 1} (${author}, ${timestamp}):\n${comment.body}`;
+		})
+		.join("\n\n---\n\n");
 }
 
 class LinearTracker {
@@ -501,7 +556,7 @@ mutation SymphonyIssueUpdate($id: String!, $input: IssueUpdateInput!) {
 query SymphonyIssueComments($id: String!) {
   issue(id: $id) {
     comments(first: 50) {
-      nodes { id body createdAt updatedAt }
+      nodes { id body createdAt updatedAt user { name email } }
     }
   }
 }`;
@@ -545,7 +600,7 @@ mutation SymphonyCommentUpdate($id: String!, $input: CommentUpdateInput!) {
 
 	async ensureWorkpadComment(issueId, marker, body) {
 		const comments = await this.fetchIssueComments(issueId);
-		const existing = comments.find((comment) => String(comment.body || "").includes(marker) || String(comment.body || "").includes("## Codex Workpad"));
+		const existing = comments.find((comment) => isWorkpadComment(comment, marker));
 		if (existing) {
 			return this.updateIssueComment(existing.id, body);
 		}
@@ -950,9 +1005,33 @@ class SymphonyOrchestrator {
 		}
 	}
 
+	async attachPromptComments(issue) {
+		if (typeof this.tracker.fetchIssueComments !== "function") {
+			return { ...issue, comments: [], recent_comments: formatPromptComments([]) };
+		}
+		try {
+			const comments = await this.tracker.fetchIssueComments(issue.id);
+			const promptComments = selectPromptComments(comments, this.workpadMarker());
+			this.log("linear_prompt_comments_loaded", { issue_id: issue.id, issue_identifier: issue.identifier, count: promptComments.length });
+			return {
+				...issue,
+				comments: promptComments,
+				recent_comments: formatPromptComments(promptComments)
+			};
+		} catch (error) {
+			this.log("linear_prompt_comments_failed", { issue_id: issue.id, issue_identifier: issue.identifier, error: error.message });
+			return {
+				...issue,
+				comments: [],
+				recent_comments: `Unable to load Linear comments for this run: ${error.message}`
+			};
+		}
+	}
+
 	async dispatchIssue(issue, attempt = null) {
 		this.claimed.add(issue.id);
 		issue = await this.transitionIssueState(issue, "on_dispatch", this.config.tracker.state_transitions?.on_dispatch_state_id);
+		issue = await this.attachPromptComments(issue);
 		const startedAt = this.now();
 		const runningEntry = {
 			issue,
@@ -1618,6 +1697,8 @@ module.exports = {
 	parseEnvFile,
 	parseFrontMatterYaml,
 	parseCodexJsonEvent,
+	selectPromptComments,
+	formatPromptComments,
 	renderWorkpadComment,
 	renderDashboard,
 	classifyLifecycleState,

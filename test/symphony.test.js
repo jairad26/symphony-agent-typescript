@@ -17,6 +17,7 @@ const {
 	normalizeIssue,
 	parseCodexJsonEvent,
 	parseEnvFile,
+	selectPromptComments,
 	renderDashboard,
 	renderWorkpadComment,
 	renderPrompt,
@@ -94,8 +95,22 @@ test("renders prompt variables strictly", () => {
 
 	assert.equal(renderPrompt("Do {{ issue.identifier }}: {{ issue.title }}", { issue }), "Do TASK-1: Wire it");
 	assert.equal(renderPrompt("Body: {{ issue.description }}", { issue }), "Body: Ticket body");
+	assert.equal(renderPrompt("Comments: {{ issue.recent_comments }}", { issue: { ...issue, recent_comments: "Use the ES match list." } }), "Comments: Use the ES match list.");
 	assert.throws(() => renderPrompt("{{ issue.missing }}", { issue }), /unknown prompt variable/);
 	assert.throws(() => renderPrompt("{{ issue.title | upcase }}", { issue }), /unsupported prompt filter/);
+});
+
+test("selects non-workpad Linear comments added after the latest workpad update", () => {
+	const comments = [
+		{ id: "old", body: "old instruction", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", user: { name: "Jai" } },
+		{ id: "workpad", body: "<!-- marker -->\n## Codex Workpad", createdAt: "2026-01-01T00:01:00.000Z", updatedAt: "2026-01-01T00:02:00.000Z" },
+		{ id: "new", body: "do not send every fun fact to the LLM", createdAt: "2026-01-01T00:03:00.000Z", updatedAt: "2026-01-01T00:03:00.000Z", user: { name: "Jai" } }
+	];
+
+	assert.deepEqual(
+		selectPromptComments(comments, "<!-- marker -->").map((comment) => comment.id),
+		["new"]
+	);
 });
 
 test("keeps workspaces inside the workspace root", () => {
