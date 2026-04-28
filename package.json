@@ -1,9 +1,10 @@
 {
-  "name": "codex-symphony",
+  "name": "codex-symphony-typescript",
   "version": "0.1.0",
   "private": false,
   "description": "A standalone Linear-to-Codex orchestration harness for running coding agents against real repositories.",
   "bin": {
+    "codex-symphony-typescript": "scripts/symphony.js",
     "codex-symphony": "scripts/symphony.js"
   },
   "scripts": {

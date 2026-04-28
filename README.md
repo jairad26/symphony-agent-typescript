@@ -1,6 +1,6 @@
-# Codex Symphony
+# Codex Symphony TypeScript
 
-Codex Symphony is a small, standalone harness for turning Linear tickets into Codex coding-agent runs against a real git repository.
+Codex Symphony TypeScript is a small, standalone TypeScript/Node.js implementation of the Symphony pattern: turning Linear tickets into Codex coding-agent runs against a real git repository.
 
 It does the boring orchestration work:
 
@@ -28,12 +28,12 @@ It does the boring orchestration work:
 
 Give your coding agent this prompt:
 
-> Set up Codex Symphony for my repository based on https://github.com/jairad26/codex-symphony. Configure Linear, the target repo, safe concurrency, and the repo workflow prompt; start in dry-run or one-ticket mode, then run the validation checks.
+> Set up Codex Symphony TypeScript for my repository based on https://github.com/jairad26/codex-symphony-typescript. Configure Linear, the target repo, safe concurrency, and the repo workflow prompt; start in dry-run or one-ticket mode, then run the validation checks.
 
 ### Option 2. Manual Setup
 
 ```bash
-git clone https://github.com/jairad26/codex-symphony.git && cd codex-symphony
+git clone https://github.com/jairad26/codex-symphony-typescript.git && cd codex-symphony-typescript
 cp .env.example .env.local && $EDITOR .env.local WORKFLOW.md
 ```
 
@@ -88,6 +88,38 @@ The server prints a local URL. Visit:
 - `/api/v1/state` for all running/retry state.
 - `/api/v1/<issue_identifier>` for one ticket.
 - `/api/v1/refresh` with `POST` to trigger a poll.
+
+## How This Relates To Harness Engineering
+
+Harness engineering is the repo-level foundation. It makes a codebase legible,
+safe, and repeatable for coding agents before any orchestrator starts handing it
+real work. A harnessed repo should teach agents how to operate through files
+like:
+
+- `AGENTS.md` for human-readable rules and local context.
+- `agent.workflow.json` for branch, PR, CI, review, and handoff policy.
+- `scripts/agent-workflow.js` or similar commands for validating the workflow.
+- `yarn agent:*`, `npm run agent:*`, or equivalent checks that agents can run.
+- Focused diagnostics docs/scripts for production logs, traces, databases,
+  search systems, deploys, and cross-repo workflows.
+
+Symphony is the orchestration layer above that foundation. It does not replace
+the target repo's harness; it relies on it. Symphony decides which Linear ticket
+to run, creates an isolated workspace, renders the ticket plus recent Linear
+comments into a prompt, starts Codex, tracks logs/tokens/status, updates the
+Linear workpad, and leaves the PR ready for human review or merge according to
+the repo's own workflow contract.
+
+The useful mental model is:
+
+```text
+Harness Engineering = teach one repo how agents should work safely.
+Symphony = route Linear work into those harnessed repos and supervise the runs.
+```
+
+This repository is the TypeScript Symphony runner. The target repositories still
+need their own harness files so the child Codex agent knows how to build, test,
+open PRs, handle review comments, and stop at the right handoff point.
 
 ## How It Works
 
