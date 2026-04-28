@@ -156,6 +156,8 @@ Recommended target repo files:
 - `AGENTS.md`: human-readable agent rules.
 - `agent.workflow.json`: machine-readable branch, PR, CI, review, and handoff policy.
 - `scripts/agent-workflow.js`: validates and prints the workflow contract.
+- Self-review/performance rules: what the agent must inspect in its own diff
+  before handoff, including added query fan-out or network/database calls.
 
 See `docs/WORKFLOW_CONTRACT.md` and `templates/` for starter files.
 See `docs/CODEX_APP_SERVER.md` for why `codex exec --json` is the default
