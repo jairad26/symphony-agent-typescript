@@ -63,9 +63,10 @@ Use the repository workflow contract:
 
 - Start by reading `AGENTS.md`.
 - Follow the repo's branch, PR, CI, and review instructions exactly.
-- Self-review your own diff before handoff. For latency-sensitive or
-  data-access-heavy changes, identify added query fan-out or network/database
-  calls and run a focused benchmark/diagnostic, or explain why one is not needed.
+- Self-review your own diff before handoff. Include `Self Review` with
+  alternatives/tradeoffs considered and `Performance Evidence` with measured
+  numbers, added query fan-out or network/database calls, or a clear explanation
+  for why no benchmark was needed.
 - Stop before merge.
 ```
 

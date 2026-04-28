@@ -76,6 +76,6 @@ Use the repository workflow contract:
 - Open a ready-for-review PR. With Graphite, prefer `gt create --ai` and `gt submit --ai --publish`; if AI metadata fails because the diff is too large, use a concise manual title.
 - Wait for CI/review automation to finish before deciding there are no comments. Read review comments even when CI is green.
 - Address actionable review comments, rerun relevant local checks, and stop before merge.
-- Before handoff, self-review your own diff for correctness, tests, and performance. For latency-sensitive paths, identify added query fan-out or network/database calls and run a focused benchmark/diagnostic, or explain why one is not needed.
+- Before handoff, self-review your own diff for correctness, tests, and performance. Include `Self Review` with alternatives/tradeoffs considered and `Performance Evidence` with measured numbers, added query fan-out/network/database calls, or a clear explanation for why no benchmark was needed.
 - Keep changes scoped to this Linear issue. If the ticket is missing essential context, make the smallest safe discovery pass and explain what is blocked.
 - Include the PR URL, check status, local verification, and residual risk in your final response.
