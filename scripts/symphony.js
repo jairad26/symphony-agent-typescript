@@ -1421,7 +1421,7 @@ function renderDashboard(snapshot) {
 <td>${escapeHtml(issue.lifecycle || "observed")}</td>
 <td>${escapeHtml(ageFor(issue.started_at))} / ${escapeHtml(issue.turn_count ?? 0)}</td>
 <td class="num">${formatNumber(issue.tokens?.total_tokens || 0)}</td>
-<td>${escapeHtml(shortSession(issue.session_id))}</td>
+<td title="${escapeHtml(String(issue.session_id || "pending"))}">${escapeHtml(shortSession(issue.session_id))}</td>
 <td title="${escapeHtml(issue.last_message || issue.last_event || "")}">${escapeHtml(truncate(issue.last_message || issue.last_event || "", 62))}</td>
 <td title="${escapeHtml(issue.workspace?.path || "")}">${escapeHtml(truncate(issue.workspace?.path || "", 42))}</td>
 </tr>`
@@ -1432,9 +1432,9 @@ function renderDashboard(snapshot) {
 			(issue) => `<tr>
 <td><span class="bullet warn-dot"></span>${escapeHtml(issue.issue_identifier)}</td>
 <td>${escapeHtml(issue.lifecycle)}</td>
-<td class="num">${issue.attempt}</td>
+<td class="num">${escapeHtml(issue.attempt)}</td>
 <td>${escapeHtml(issue.due_at)}</td>
-<td title="${escapeHtml(issue.error || "")}">${escapeHtml(truncate(issue.error || "", 78))}</td>
+<td colspan="4" title="${escapeHtml(issue.error || "")}">${escapeHtml(truncate(issue.error || "", 78))}</td>
 </tr>`
 		)
 		.join("");
