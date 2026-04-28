@@ -16,6 +16,7 @@ const {
 	normalizeIssue,
 	parseCodexJsonEvent,
 	parseEnvFile,
+	renderWorkpadComment,
 	renderPrompt,
 	validateDispatchConfig
 } = require("../scripts/symphony.js");
@@ -142,6 +143,77 @@ test("Linear state updates use issueUpdate with stateId", async () => {
 	assert.equal(updated.state, "In Progress");
 	assert.match(requests[0].query, /issueUpdate/);
 	assert.deepEqual(requests[0].variables, { id: "issue-1", input: { stateId: "state-in-progress" } });
+});
+
+test("Linear workpad comments are created or reused by marker", async () => {
+	const requests = [];
+	let existingComments = [];
+	const tracker = new LinearTracker(
+		{
+			tracker: {
+				endpoint: "https://api.linear.app/graphql",
+				api_key: "token",
+				timeout_ms: 1000
+			}
+		},
+		async (_url, request) => {
+			const body = JSON.parse(request.body);
+			requests.push(body);
+			if (body.query.includes("SymphonyIssueComments")) {
+				return {
+					ok: true,
+					async json() {
+						return { data: { issue: { comments: { nodes: existingComments } } } };
+					}
+				};
+			}
+			if (body.query.includes("SymphonyCommentCreate")) {
+				existingComments = [{ id: "comment-1", body: body.variables.input.body }];
+				return {
+					ok: true,
+					async json() {
+						return { data: { commentCreate: { success: true, comment: existingComments[0] } } };
+					}
+				};
+			}
+			return {
+				ok: true,
+				async json() {
+					return { data: { commentUpdate: { success: true, comment: { id: body.variables.id, body: body.variables.input.body } } } };
+				}
+			};
+		}
+	);
+
+	const created = await tracker.ensureWorkpadComment("issue-1", "<!-- marker -->", "<!-- marker -->\n## Codex Workpad");
+	const updated = await tracker.ensureWorkpadComment("issue-1", "<!-- marker -->", "<!-- marker -->\nupdated");
+
+	assert.equal(created.id, "comment-1");
+	assert.equal(updated.id, "comment-1");
+	assert.match(requests[1].query, /commentCreate/);
+	assert.match(requests[3].query, /commentUpdate/);
+});
+
+test("renders a durable workpad comment body", () => {
+	const body = renderWorkpadComment({
+		marker: "<!-- marker -->",
+		issue: normalizeIssue({ id: "1", identifier: "TASK-1", title: "Wire it", state: "In Progress" }),
+		entry: {
+			attempt: null,
+			workspace: { path: "/tmp/workspace/TASK-1" },
+			session_id: "session-1",
+			last_event: "agent_output",
+			tokens: { input_tokens: 3, output_tokens: 2, total_tokens: 5 }
+		},
+		status: "Launching agent",
+		note: "hello",
+		generatedAt: "2026-01-01T00:00:00.000Z"
+	});
+
+	assert.match(body, /<!-- marker -->/);
+	assert.match(body, /## Codex Workpad/);
+	assert.match(body, /TASK-1 - Wire it/);
+	assert.match(body, /Tokens observed: 5 total/);
 });
 
 test("parses Codex token events and estimates running output activity", () => {

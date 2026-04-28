@@ -25,6 +25,11 @@ Linear ticket
   -> PR ready for human merge
 ```
 
+Symphony creates a persistent `## Codex Workpad` comment on each Linear issue
+when `tracker.workpad.enabled` is true. The orchestrator keeps basic status
+fresh there. If your agent has Linear tools, teach it to update the same comment
+with plan, validation, review feedback, and handoff notes.
+
 ## Minimum Contract
 
 At minimum, add an `AGENTS.md` file to the target repo:

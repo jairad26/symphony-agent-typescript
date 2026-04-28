@@ -10,6 +10,9 @@ tracker:
   state_transitions:
     on_dispatch_state_id: ""
     on_pr_open_state_id: ""
+  workpad:
+    enabled: true
+    marker: "<!-- codex-symphony-workpad -->"
 polling:
   interval_ms: 30000
 repository:
@@ -52,6 +55,7 @@ Use the repository workflow contract:
 
 - Read the repository's agent instructions first, such as `AGENTS.md`, `CLAUDE.md`, or local docs.
 - If the repo has `agent.workflow.json` or `scripts/agent-workflow.js`, use them as the source of truth for branch, PR, CI, review, and handoff rules.
+- Use the existing `## Codex Workpad` Linear comment as the persistent progress scratchpad when Linear tools are available.
 - Sync before feature work. If the repo uses Graphite, run `gt sync`.
 - Create a dedicated branch for the issue. If Graphite says the branch is untracked, run `gt track --parent <base-branch> --no-interactive`.
 - Open a ready-for-review PR. With Graphite, prefer `gt create --ai` and `gt submit --ai --publish`; if AI metadata fails because the diff is too large, use a concise manual title.

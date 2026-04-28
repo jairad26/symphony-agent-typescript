@@ -17,7 +17,11 @@ const DEFAULTS = {
 		active_states: ["Todo", "In Progress"],
 		terminal_states: ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"],
 		page_size: 50,
-		timeout_ms: 30000
+		timeout_ms: 30000,
+		workpad: {
+			enabled: true,
+			marker: "<!-- codex-symphony-workpad -->"
+		}
 	},
 	polling: { interval_ms: 30000 },
 	repository: {
@@ -483,6 +487,62 @@ mutation SymphonyIssueUpdate($id: String!, $input: IssueUpdateInput!) {
 		}
 		return normalizeIssue(data.issueUpdate.issue);
 	}
+
+	async fetchIssueComments(issueId) {
+		const query = `
+query SymphonyIssueComments($id: String!) {
+  issue(id: $id) {
+    comments(first: 50) {
+      nodes { id body createdAt updatedAt }
+    }
+  }
+}`;
+		const data = await this.postGraphql(query, { id: issueId });
+		const comments = data?.issue?.comments?.nodes;
+		if (!Array.isArray(comments)) {
+			throw Object.assign(new Error("Linear issue comments payload is malformed"), { category: "linear_unknown_payload" });
+		}
+		return comments;
+	}
+
+	async createIssueComment(issueId, body) {
+		const query = `
+mutation SymphonyCommentCreate($input: CommentCreateInput!) {
+  commentCreate(input: $input) {
+    success
+    comment { id body }
+  }
+}`;
+		const data = await this.postGraphql(query, { input: { issueId, body } });
+		if (!data?.commentCreate?.success || !data.commentCreate.comment) {
+			throw Object.assign(new Error("Linear commentCreate payload is malformed"), { category: "linear_unknown_payload" });
+		}
+		return data.commentCreate.comment;
+	}
+
+	async updateIssueComment(commentId, body) {
+		const query = `
+mutation SymphonyCommentUpdate($id: String!, $input: CommentUpdateInput!) {
+  commentUpdate(id: $id, input: $input) {
+    success
+    comment { id body }
+  }
+}`;
+		const data = await this.postGraphql(query, { id: commentId, input: { body } });
+		if (!data?.commentUpdate?.success || !data.commentUpdate.comment) {
+			throw Object.assign(new Error("Linear commentUpdate payload is malformed"), { category: "linear_unknown_payload" });
+		}
+		return data.commentUpdate.comment;
+	}
+
+	async ensureWorkpadComment(issueId, marker, body) {
+		const comments = await this.fetchIssueComments(issueId);
+		const existing = comments.find((comment) => String(comment.body || "").includes(marker) || String(comment.body || "").includes("## Codex Workpad"));
+		if (existing) {
+			return this.updateIssueComment(existing.id, body);
+		}
+		return this.createIssueComment(issueId, body);
+	}
 }
 
 class WorkspaceManager {
@@ -644,6 +704,7 @@ class AgentRunner {
 					SYMPHONY_LINK_NODE_MODULES: this.config.repository.link_node_modules === false ? "false" : "true",
 					SYMPHONY_ISSUE_ID: issue.id,
 					SYMPHONY_ISSUE_IDENTIFIER: issue.identifier,
+					SYMPHONY_WORKPAD_COMMENT_ID: issue.workpad_comment_id || "",
 					SYMPHONY_LINEAR_ENDPOINT: this.config.tracker.endpoint || DEFAULTS.tracker.endpoint,
 					SYMPHONY_LINEAR_IN_REVIEW_STATE_ID: this.config.tracker.state_transitions?.on_pr_open_state_id || "",
 					LINEAR_API_KEY: this.config.tracker.api_key || process.env.LINEAR_API_KEY || "",
@@ -821,6 +882,41 @@ class SymphonyOrchestrator {
 		}
 	}
 
+	workpadMarker() {
+		return this.config.tracker.workpad?.marker || DEFAULTS.tracker.workpad.marker;
+	}
+
+	workpadEnabled() {
+		return this.config.tracker.workpad?.enabled !== false;
+	}
+
+	async updateWorkpad(runningEntry, status, note = "") {
+		if (!this.workpadEnabled() || typeof this.tracker.ensureWorkpadComment !== "function") {
+			return;
+		}
+		const body = renderWorkpadComment({
+			marker: this.workpadMarker(),
+			issue: runningEntry.issue,
+			entry: runningEntry,
+			status,
+			note,
+			generatedAt: new Date(this.now()).toISOString()
+		});
+		try {
+			let comment;
+			if (runningEntry.workpad_comment_id && typeof this.tracker.updateIssueComment === "function") {
+				comment = await this.tracker.updateIssueComment(runningEntry.workpad_comment_id, body);
+			} else {
+				comment = await this.tracker.ensureWorkpadComment(runningEntry.issue.id, this.workpadMarker(), body);
+			}
+			runningEntry.workpad_comment_id = comment.id;
+			runningEntry.issue.workpad_comment_id = comment.id;
+			this.log("linear_workpad_updated", { issue_id: runningEntry.issue.id, issue_identifier: runningEntry.issue.identifier, comment_id: comment.id, status });
+		} catch (error) {
+			this.log("linear_workpad_update_failed", { issue_id: runningEntry.issue.id, issue_identifier: runningEntry.issue.identifier, status, error: error.message });
+		}
+	}
+
 	async dispatchIssue(issue, attempt = null) {
 		this.claimed.add(issue.id);
 		issue = await this.transitionIssueState(issue, "on_dispatch", this.config.tracker.state_transitions?.on_dispatch_state_id);
@@ -837,15 +933,18 @@ class SymphonyOrchestrator {
 			turn_count: 0,
 			session_id: null,
 			tokens: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
-			workspace: null
+			workspace: null,
+			workpad_comment_id: null
 		};
 		this.running.set(issue.id, runningEntry);
 		this.log("issue_dispatching", { issue_id: issue.id, issue_identifier: issue.identifier });
 		try {
+			await this.updateWorkpad(runningEntry, "Preparing workspace");
 			runningEntry.workspace = this.workspaceManager.prepare(issue);
 			runningEntry.phase = "BuildingPrompt";
 			const prompt = renderPrompt(this.config.prompt_template, { issue, attempt });
 			runningEntry.phase = "LaunchingAgentProcess";
+			await this.updateWorkpad(runningEntry, "Launching agent");
 			this.workspaceManager.runHook("before_run", runningEntry.workspace.path, this.workspaceManager.hookEnv(issue, runningEntry.workspace.path));
 			const outcome = await this.runner.run({
 				issue,
@@ -857,11 +956,13 @@ class SymphonyOrchestrator {
 			runningEntry.phase = outcome.status;
 			runningEntry.session_id = outcome.session_id || runningEntry.session_id;
 			this.log("issue_run_completed", { issue_id: issue.id, issue_identifier: issue.identifier, status: outcome.status });
+			await this.updateWorkpad(runningEntry, outcome.status, "Agent turn completed. Symphony scheduled a continuation check while the issue remains active.");
 			this.scheduleRetry(issue, 1, "continuation check", 1000);
 		} catch (error) {
 			const status = error.status || "Failed";
 			runningEntry.phase = status;
 			this.log("issue_run_failed", { issue_id: issue.id, issue_identifier: issue.identifier, status, error: error.message });
+			await this.updateWorkpad(runningEntry, status, error.message);
 			this.scheduleRetry(issue, (attempt || 0) + 1, error.message);
 		} finally {
 			try {
@@ -1120,6 +1221,44 @@ function extractTokenUsage(usage) {
 	};
 }
 
+function renderWorkpadComment({ marker, issue, entry, status, note = "", generatedAt }) {
+	const workspacePath = entry.workspace?.path || "not created yet";
+	const tokens = entry.tokens || { input_tokens: 0, output_tokens: 0, total_tokens: 0 };
+	const attemptText = entry.attempt == null ? "initial" : String(entry.attempt);
+	return `${marker}
+## Codex Workpad
+
+### Status
+- Issue: ${issue.identifier} - ${issue.title}
+- Linear state: ${issue.state}
+- Symphony status: ${status}
+- Attempt: ${attemptText}
+- Workspace: \`${workspacePath}\`
+- Session: ${entry.session_id || "not started"}
+- Last event: ${entry.last_event || "none"}
+- Updated: ${generatedAt}
+
+### Plan
+- [ ] Follow the target repository workflow contract.
+- [ ] Keep implementation scoped to this ticket.
+- [ ] Open or update a ready-for-review PR.
+- [ ] Stop before merge.
+
+### Acceptance Criteria
+- [ ] Ticket acceptance criteria are satisfied.
+- [ ] PR is linked or discoverable from the branch.
+- [ ] Review comments are addressed or explicitly pushed back.
+
+### Validation
+- [ ] Relevant local checks are run.
+- [ ] CI/review automation is checked before handoff.
+
+### Notes
+- Tokens observed: ${tokens.total_tokens} total (${tokens.input_tokens} input, ${tokens.output_tokens} output).
+${note ? `- Latest note: ${note}` : "- Latest note: none"}
+`;
+}
+
 function estimateTokenUsageFromText(text) {
 	const tokenCount = Math.ceil(String(text || "").length / 4);
 	return { input_tokens: tokenCount, output_tokens: 0, total_tokens: tokenCount };
@@ -1352,6 +1491,7 @@ module.exports = {
 	parseEnvFile,
 	parseFrontMatterYaml,
 	parseCodexJsonEvent,
+	renderWorkpadComment,
 	estimateTokenUsageFromText,
 	readWorkflowFile,
 	renderPrompt,

@@ -10,6 +10,7 @@ It does the boring orchestration work:
 - Streams child-agent output into `agent-run.log`.
 - Tracks running/retry state through a local JSON API.
 - Optionally moves Linear tickets to `In Progress` and `In Review`.
+- Maintains one persistent `## Codex Workpad` Linear comment per issue.
 - Creates/reuses git worktrees and leaves PRs ready for human merge.
 
 ## Requirements
@@ -41,6 +42,7 @@ Edit `WORKFLOW.md`:
 - `tracker.assignee_email`: owner filter for tickets the harness may pick up.
 - `tracker.active_states`: states to poll.
 - `tracker.state_transitions`: optional Linear state ids for dispatch and PR handoff.
+- `tracker.workpad`: enable or customize the persistent Linear workpad comment.
 - `repository.root`: target git repository.
 - `repository.base_branch`: usually `main` or `develop`.
 - `workspace.root`: where per-ticket workspaces live.
@@ -81,6 +83,7 @@ The server prints a local URL. Visit:
 - Loads `.env.local` without overriding existing environment variables.
 - Queries Linear for active issues.
 - Applies assignment, state, blocker, concurrency, and retry rules.
+- Creates or updates the issue's persistent `## Codex Workpad` comment.
 - Creates a per-issue workspace under `workspace.root`.
 - Renders the prompt with `{{ issue.* }}` variables.
 - Runs the configured child command and records output.

@@ -7,12 +7,13 @@ Codex Symphony is meant to make agent runs boring and inspectable.
 1. Poll Linear for active issues in one project.
 2. Filter by assignee, state, blockers, and concurrency.
 3. Move the issue to a dispatch state when configured.
-4. Create a workspace and target-repo worktree.
-5. Render the issue prompt.
-6. Run `codex exec`.
-7. Stream logs and state to the local server.
-8. If a PR exists, mark it ready and optionally move Linear to review.
-9. Stop before merge.
+4. Create or update the persistent `## Codex Workpad` Linear comment.
+5. Create a workspace and target-repo worktree.
+6. Render the issue prompt.
+7. Run `codex exec`.
+8. Stream logs and state to the local server.
+9. If a PR exists, mark it ready and optionally move Linear to review.
+10. Stop before merge.
 
 ## What Symphony Knows
 
@@ -22,6 +23,7 @@ Symphony knows what it directly observes:
 - Local workspace paths.
 - Child process status.
 - Child output and approximate running token activity.
+- Workpad comment id and latest workpad update status.
 - PR URL when the wrapper can read one with `gh`.
 
 Symphony does not claim merge completion unless you add a separate merge monitor. That is intentional; PR-opened and merged are different facts.
