@@ -29,7 +29,8 @@ const DEFAULTS = {
 		base_branch: "main",
 		branch_prefix: "symphony",
 		env_file: ".env.local",
-		link_node_modules: true
+		link_node_modules: true,
+		sync_on_tick: true
 	},
 	workspace: { root: path.join(os.tmpdir(), "symphony_workspaces") },
 	hooks: { timeout_ms: 60000 },
@@ -410,6 +411,60 @@ function gitBranchExists(repoRoot, branchName) {
 	} catch (_error) {
 		return false;
 	}
+}
+
+function runRepositorySync(config, logger = defaultLogger) {
+	if (config.repository?.sync_on_tick === false) {
+		logger("repository_sync_skipped", { reason: "disabled" });
+		return { skipped: true, errors: [] };
+	}
+	const repoRoot = path.resolve(config.repository?.root || ".");
+	if (!fs.existsSync(path.join(repoRoot, ".git"))) {
+		logger("repository_sync_skipped", { reason: "missing_git_repository", repo_root: repoRoot });
+		return { skipped: true, errors: [] };
+	}
+	const errors = [];
+	const timeout = config.hooks?.timeout_ms || DEFAULTS.hooks.timeout_ms;
+	const baseBranch = config.repository?.base_branch || DEFAULTS.repository.base_branch;
+	const runStep = (step, command, args, options = {}) => {
+		try {
+			childProcess.execFileSync(command, args, {
+				cwd: repoRoot,
+				timeout,
+				stdio: "pipe",
+				...options
+			});
+			logger("repository_sync_step_completed", { step });
+			return true;
+		} catch (error) {
+			errors.push(`${step}: ${error.message}`);
+			logger("repository_sync_step_failed", { step, error: error.message });
+			return false;
+		}
+	};
+	const graphiteAvailable = () => {
+		try {
+			childProcess.execFileSync("sh", ["-lc", "command -v gt >/dev/null 2>&1"], {
+				cwd: repoRoot,
+				timeout,
+				stdio: "pipe"
+			});
+			logger("repository_sync_step_completed", { step: "detect_graphite" });
+			return true;
+		} catch (_error) {
+			logger("repository_sync_step_skipped", { step: "gt_sync", reason: "graphite_unavailable" });
+			return false;
+		}
+	};
+
+	logger("repository_sync_starting", { repo_root: repoRoot, base_branch: baseBranch });
+	runStep("git_fetch_base", "git", ["fetch", "origin", baseBranch, "--quiet"]);
+	runStep("git_worktree_prune", "git", ["worktree", "prune"]);
+	if (graphiteAvailable()) {
+		runStep("gt_sync", "gt", ["sync"]);
+	}
+	logger(errors.length ? "repository_sync_completed_with_errors" : "repository_sync_completed", { errors });
+	return { skipped: false, errors };
 }
 
 function normalizeIssueComment(comment) {
@@ -1065,6 +1120,7 @@ class SymphonyOrchestrator {
 			this.log("dispatch_validation_failed", { error: this.lastError });
 			return { dispatched: 0, skipped: true, errors: validation };
 		}
+		runRepositorySync(this.config, this.logger);
 		let candidates;
 		try {
 			candidates = await this.tracker.fetchCandidateIssues();
@@ -2139,6 +2195,7 @@ module.exports = {
 	estimateTokenUsageFromText,
 	readWorkflowFile,
 	renderPrompt,
+	runRepositorySync,
 	sortCandidates,
 	validateDispatchConfig
 };

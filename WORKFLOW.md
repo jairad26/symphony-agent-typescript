@@ -21,6 +21,7 @@ repository:
   branch_prefix: symphony
   env_file: .env.local
   link_node_modules: true
+  sync_on_tick: true
 workspace:
   root: ~/.symphony/workspaces/example
 hooks:
@@ -73,6 +74,7 @@ Use the repository workflow contract:
 - Read the repository's agent instructions first, such as `AGENTS.md`, `CLAUDE.md`, or local docs.
 - If the repo has `agent.workflow.json` or `scripts/agent-workflow.js`, use them as the source of truth for branch, PR, CI, review, and handoff rules.
 - Use the existing `## Symphony Workpad` Linear comment as the persistent progress scratchpad when Linear tools are available.
+- The scheduler runs a best-effort repository sync before each candidate poll so merged Graphite branches and stale worktree metadata are visible before blocker checks.
 - Sync before feature work. If the repo uses Graphite, run `gt sync`.
 - If Linear says this issue is blocked by exactly one active issue, Symphony may set `SYMPHONY_STACK_PARENT_BRANCH` and create this branch from that blocker branch so the PRs stack in Graphite. Issues with multiple active blockers wait until only one active blocker remains.
 - Create a dedicated branch for the issue. If Graphite says the branch is untracked, run `gt track --parent "$SYMPHONY_STACK_PARENT_BRANCH" --no-interactive` when `SYMPHONY_STACK_PARENT_BRANCH` is set; otherwise run `gt track --parent <base-branch> --no-interactive`.

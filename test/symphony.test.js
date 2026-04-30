@@ -28,6 +28,7 @@ const {
 	renderDashboard,
 	renderWorkpadComment,
 	renderPrompt,
+	runRepositorySync,
 	validateDispatchConfig
 } = require("../scripts/symphony.js");
 
@@ -266,6 +267,50 @@ test("loads env files without mangling quoted inline comments", () => {
 	} finally {
 		fs.rmSync(dir, { recursive: true, force: true });
 	}
+});
+
+test("repository sync runs best-effort Graphite cleanup steps", () => {
+	const dir = tempDir();
+	const originalExecFileSync = childProcess.execFileSync;
+	const commands = [];
+	const events = [];
+	try {
+		fs.mkdirSync(path.join(dir, ".git"));
+		childProcess.execFileSync = (command, args) => {
+			commands.push([command, ...args].join(" "));
+			return Buffer.from("");
+		};
+
+		const result = runRepositorySync(
+			{
+				repository: { root: dir, base_branch: "main", sync_on_tick: true },
+				hooks: { timeout_ms: 1000 }
+			},
+			(event) => events.push(event)
+		);
+
+		assert.deepEqual(result, { skipped: false, errors: [] });
+		assert.deepEqual(commands, ["git fetch origin main --quiet", "git worktree prune", "sh -lc command -v gt >/dev/null 2>&1", "gt sync"]);
+		assert.deepEqual(events, [
+			"repository_sync_starting",
+			"repository_sync_step_completed",
+			"repository_sync_step_completed",
+			"repository_sync_step_completed",
+			"repository_sync_step_completed",
+			"repository_sync_completed"
+		]);
+	} finally {
+		childProcess.execFileSync = originalExecFileSync;
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("repository sync can be disabled per workflow", () => {
+	const events = [];
+	const result = runRepositorySync({ repository: { sync_on_tick: false } }, (event) => events.push(event));
+
+	assert.deepEqual(result, { skipped: true, errors: [] });
+	assert.deepEqual(events, ["repository_sync_skipped"]);
 });
 
 test("renders prompt variables strictly", () => {
