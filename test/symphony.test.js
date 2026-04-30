@@ -324,7 +324,7 @@ test("renders prompt variables strictly", () => {
 	assert.throws(() => renderPrompt("{{ issue.title | upcase }}", { issue }), /unsupported prompt filter/);
 });
 
-test("allows a blocked issue to stack on exactly one available blocker branch", () => {
+test("keeps blocked issues ineligible even when the blocker branch exists", () => {
 	const dir = tempDir();
 	try {
 		initGitRepo(dir);
@@ -347,7 +347,7 @@ test("allows a blocked issue to stack on exactly one available blocker branch", 
 		childProcess.execFileSync("git", ["branch", "symphony-task-1"], { cwd: dir });
 
 		assert.deepEqual(orchestrator.stackParentFor(blocked), { issue: blocker, branch: "symphony-task-1" });
-		assert.equal(orchestrator.isEligible(blocked), true);
+		assert.equal(orchestrator.isEligible(blocked), false);
 	} finally {
 		fs.rmSync(dir, { recursive: true, force: true });
 	}
@@ -382,7 +382,7 @@ test("keeps issues with multiple active blockers ineligible", () => {
 	}
 });
 
-test("allows multi-blocked issues once all but one blocker are terminal", () => {
+test("keeps multi-blocked issues ineligible until every blocker is terminal", () => {
 	const dir = tempDir();
 	try {
 		initGitRepo(dir);
@@ -405,10 +405,30 @@ test("allows multi-blocked issues once all but one blocker are terminal", () => 
 		childProcess.execFileSync("git", ["branch", "symphony-task-1"], { cwd: dir });
 
 		assert.deepEqual(orchestrator.stackParentFor(blocked), { issue: remainingBlocker, branch: "symphony-task-1" });
-		assert.equal(orchestrator.isEligible(blocked), true);
+		assert.equal(orchestrator.isEligible(blocked), false);
 	} finally {
 		fs.rmSync(dir, { recursive: true, force: true });
 	}
+});
+
+test("allows blocked issues once all blockers are terminal", () => {
+	const config = {
+		tracker: { active_states: ["Todo", "In Progress"], terminal_states: ["Done"] },
+		repository: { root: process.cwd(), branch_prefix: "symphony" },
+		agent: { max_concurrent_agents: 1, max_concurrent_agents_by_state: {} }
+	};
+	const orchestrator = new SymphonyOrchestrator({ config, tracker: {}, runner: {}, workspaceManager: {}, logger: () => {} });
+	const doneBlocker = normalizeIssue({ id: "1", identifier: "TASK-1", title: "Merged base change", state: { name: "Done" } });
+	const blocked = normalizeIssue({
+		id: "2",
+		identifier: "TASK-2",
+		title: "Dependent change",
+		state: { name: "Todo" },
+		blocked_by: [doneBlocker]
+	});
+
+	assert.equal(orchestrator.stackParentFor(blocked), null);
+	assert.equal(orchestrator.isEligible(blocked), true);
 });
 
 test("selects non-workpad Linear comments added after the latest workpad update", () => {
@@ -490,7 +510,7 @@ test("keeps workspaces inside the workspace root", () => {
 	}
 });
 
-test("allows blocked issues to stack on an available blocker branch", () => {
+test("keeps blocked issues gated in the standalone duplicate branch-readiness coverage", () => {
 	const dir = tempDir();
 	try {
 		childProcess.execFileSync("git", ["init"], { cwd: dir, stdio: "ignore" });
@@ -518,7 +538,7 @@ test("allows blocked issues to stack on an available blocker branch", () => {
 		childProcess.execFileSync("git", ["branch", "symphony-task-1"], { cwd: dir });
 
 		assert.deepEqual(orchestrator.stackParentFor(blocked), { issue: blocker, branch: "symphony-task-1" });
-		assert.equal(orchestrator.isEligible(blocked), true);
+		assert.equal(orchestrator.isEligible(blocked), false);
 	} finally {
 		fs.rmSync(dir, { recursive: true, force: true });
 	}
