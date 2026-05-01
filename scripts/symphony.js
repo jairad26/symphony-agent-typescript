@@ -2066,19 +2066,8 @@ async function main(argv = process.argv.slice(2)) {
 				runtime.log("workflow_reload_failed", { error: error.message });
 			}
 		});
-		let pollInFlight = false;
 		const runPollTick = () => {
-			if (pollInFlight) {
-				runtime.log("poll_tick_skipped", { reason: "tick_in_flight" });
-				return;
-			}
-			pollInFlight = true;
-			runtime
-				.tick()
-				.catch((error) => runtime.log("poll_tick_failed", { error: error.message }))
-				.finally(() => {
-					pollInFlight = false;
-				});
+			runtime.tick().catch((error) => runtime.log("poll_tick_failed", { error: error.message }));
 		};
 		let pollTimer = null;
 		const schedulePollLoop = ({ runImmediately } = { runImmediately: true }) => {
