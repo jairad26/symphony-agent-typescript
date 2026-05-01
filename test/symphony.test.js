@@ -324,6 +324,26 @@ test("renders prompt variables strictly", () => {
 	assert.throws(() => renderPrompt("{{ issue.title | upcase }}", { issue }), /unsupported prompt filter/);
 });
 
+test("normalizes inverse Linear blocks relations as blockers", () => {
+	const issue = normalizeIssue({
+		id: "1",
+		identifier: "TASK-1",
+		title: "Blocked issue",
+		state: { name: "Todo" },
+		inverseRelations: {
+			nodes: [
+				{ type: "blocks", issue: { id: "2", identifier: "TASK-2", title: "Actual blocker", state: { name: "Todo" } } },
+				{ type: "blocked_by", issue: { id: "3", identifier: "TASK-3", title: "Dependent", state: { name: "Todo" } } }
+			]
+		}
+	});
+
+	assert.deepEqual(
+		issue.blocked_by.map((blocker) => blocker.identifier),
+		["TASK-2"]
+	);
+});
+
 test("keeps blocked issues ineligible even when the blocker branch exists", () => {
 	const dir = tempDir();
 	try {
