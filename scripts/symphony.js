@@ -364,11 +364,14 @@ function normalizeIssue(issue) {
 				email: issue.assignee.email || null
 			}
 		: null;
+	const relationBlockers = (issue.relations?.nodes || [])
+		.filter((relation) => relation.type === "blocked_by" && relation.relatedIssue)
+		.map((relation) => relation.relatedIssue);
+	const inverseRelationBlockers = (issue.inverseRelations?.nodes || [])
+		.filter((relation) => relation.type === "blocks" && relation.issue)
+		.map((relation) => relation.issue);
 	const blockedBy =
-		issue.blocked_by ||
-		(issue.relations?.nodes || [])
-			.filter((relation) => relation.type === "blocked_by" && relation.relatedIssue)
-			.map((relation) => normalizeIssue(relation.relatedIssue));
+		issue.blocked_by || [...relationBlockers, ...inverseRelationBlockers].map((blocker) => normalizeIssue(blocker));
 	return {
 		id: issue.id,
 		identifier: issue.identifier,
@@ -666,7 +669,8 @@ query SymphonyCandidateIssues($projectSlug: String!, $activeStates: [String!], $
       state { name }
       assignee { id name email }
       labels { nodes { name } }
-      relations { nodes { type relatedIssue { id identifier title description state { name } assignee { id name email } } } }
+      relations(first: 50) { nodes { type relatedIssue { id identifier title description state { name } assignee { id name email } } } }
+      inverseRelations(first: 50) { nodes { type issue { id identifier title description state { name } assignee { id name email } } } }
     }
     pageInfo { hasNextPage endCursor }
   }
@@ -2062,8 +2066,19 @@ async function main(argv = process.argv.slice(2)) {
 				runtime.log("workflow_reload_failed", { error: error.message });
 			}
 		});
+		let pollInFlight = false;
 		const runPollTick = () => {
-			runtime.tick().catch((error) => runtime.log("poll_tick_failed", { error: error.message }));
+			if (pollInFlight) {
+				runtime.log("poll_tick_skipped", { reason: "tick_in_flight" });
+				return;
+			}
+			pollInFlight = true;
+			runtime
+				.tick()
+				.catch((error) => runtime.log("poll_tick_failed", { error: error.message }))
+				.finally(() => {
+					pollInFlight = false;
+				});
 		};
 		let pollTimer = null;
 		const schedulePollLoop = ({ runImmediately } = { runImmediately: true }) => {
