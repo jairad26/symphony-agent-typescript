@@ -530,6 +530,84 @@ test("keeps workspaces inside the workspace root", () => {
 	}
 });
 
+test("reserves agent slots while dispatch setup is still awaiting tracker work", async () => {
+	const dir = tempDir();
+	try {
+		const config = {
+			tracker: {
+				kind: "linear",
+				api_key: "token",
+				project_slug: "orbit",
+				active_states: ["Todo", "In Progress"],
+				terminal_states: ["Done"],
+				state_transitions: { on_dispatch_state_id: "state-in-progress" },
+				workpad: { enabled: false }
+			},
+			polling: { interval_ms: 30000 },
+			repository: { root: process.cwd(), base_branch: "main", sync_on_tick: false },
+			workspace: { root: dir },
+			hooks: { timeout_ms: 1000 },
+			agent: { max_concurrent_agents: 1, max_turns: 3, max_retry_backoff_ms: 300000, max_concurrent_agents_by_state: {} },
+			agent_runtime: { provider: "generic-cli", command: "agent run", event_format: "plain" },
+			prompt_template: "Issue {{ issue.identifier }}: {{ issue.title }}"
+		};
+		const candidates = [
+			normalizeIssue({ id: "1", identifier: "ORB-1", title: "First todo", state: { name: "Todo" } }),
+			normalizeIssue({ id: "2", identifier: "ORB-2", title: "Second todo", state: { name: "Todo" } })
+		];
+		let releaseTransition;
+		let transitionStarted;
+		const transitionStartedPromise = new Promise((resolve) => {
+			transitionStarted = resolve;
+		});
+		const releaseTransitionPromise = new Promise((resolve) => {
+			releaseTransition = resolve;
+		});
+		const runner = {
+			runs: [],
+			async run({ issue }) {
+				this.runs.push(issue.identifier);
+				return { status: "Succeeded", session_id: `${issue.identifier}-session`, turns: 1 };
+			}
+		};
+		const tracker = {
+			transitions: [],
+			async updateIssueState(issueId) {
+				this.transitions.push(issueId);
+				transitionStarted();
+				await releaseTransitionPromise;
+				return normalizeIssue({ id: issueId, identifier: `ORB-${issueId}`, title: "Moved", state: { name: "In Progress" } });
+			},
+			async fetchCandidateIssues() {
+				return candidates;
+			},
+			async fetchIssueStatesByIds() {
+				return new Map();
+			}
+		};
+		const orchestrator = new SymphonyOrchestrator({
+			config,
+			tracker,
+			runner,
+			workspaceManager: new WorkspaceManager(config, () => {}),
+			logger: () => {}
+		});
+
+		const firstTick = orchestrator.tick();
+		await transitionStartedPromise;
+		const secondTickResult = await orchestrator.tick();
+		releaseTransition();
+		const firstTickResult = await firstTick;
+
+		assert.deepEqual(secondTickResult, { dispatched: 0, skipped: false, errors: [] });
+		assert.equal(firstTickResult.dispatched, 1);
+		assert.deepEqual(tracker.transitions, ["1"]);
+		assert.deepEqual(runner.runs, ["ORB-1"]);
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
+});
+
 test("keeps blocked issues gated in the standalone duplicate branch-readiness coverage", () => {
 	const dir = tempDir();
 	try {

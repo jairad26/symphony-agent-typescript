@@ -1095,6 +1095,7 @@ class SymphonyOrchestrator {
 		this.logger = logger;
 		this.now = now;
 		this.running = new Map();
+		this.dispatching = new Map();
 		this.claimed = new Set();
 		this.retryAttempts = new Map();
 		this.events = [];
@@ -1197,7 +1198,11 @@ class SymphonyOrchestrator {
 	}
 
 	availableGlobalSlots() {
-		return Math.max(this.config.agent.max_concurrent_agents - this.running.size, 0);
+		return Math.max(this.config.agent.max_concurrent_agents - this.reservedAgentSlots(), 0);
+	}
+
+	reservedAgentSlots() {
+		return this.running.size + this.dispatching.size;
 	}
 
 	availableSlotsFor(state, scheduledByState = new Map()) {
@@ -1207,8 +1212,9 @@ class SymphonyOrchestrator {
 			return globalAvailable;
 		}
 		const runningForState = [...this.running.values()].filter((entry) => entry.issue.state === state).length;
+		const dispatchingForState = [...this.dispatching.values()].filter((issue) => issue.state === state).length;
 		const scheduledForState = scheduledByState.get(state) || 0;
-		return Math.min(globalAvailable, Math.max(perStateLimit - runningForState - scheduledForState, 0));
+		return Math.min(globalAvailable, Math.max(perStateLimit - runningForState - dispatchingForState - scheduledForState, 0));
 	}
 
 	async transitionIssueState(issue, transition, stateId) {
@@ -1410,31 +1416,35 @@ query($owner: String!, $repo: String!, $number: Int!) {
 
 	async dispatchIssue(issue, attempt = null) {
 		this.claimed.add(issue.id);
-		const stackParent = this.stackParentFor(issue);
-		issue = await this.transitionIssueState(issue, "on_dispatch", this.config.tracker.state_transitions?.on_dispatch_state_id);
-		if (stackParent) {
-			issue = { ...issue, stack_parent: stackParent };
-		}
-		issue = await this.attachPromptComments(issue);
-		const startedAt = this.now();
-		const runningEntry = {
-			issue,
-			attempt,
-			phase: "PreparingWorkspace",
-			started_at_ms: startedAt,
-			started_at: new Date(startedAt).toISOString(),
-			last_agent_timestamp_ms: null,
-			last_event: "started",
-			last_message: "",
-			turn_count: 0,
-			session_id: null,
-			tokens: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
-			workspace: null,
-			workpad_comment_id: null
-		};
-		this.running.set(issue.id, runningEntry);
-		this.log("issue_dispatching", { issue_id: issue.id, issue_identifier: issue.identifier });
+		this.dispatching.set(issue.id, issue);
+		let startedAt = this.now();
+		let runningEntry = null;
 		try {
+			const stackParent = this.stackParentFor(issue);
+			issue = await this.transitionIssueState(issue, "on_dispatch", this.config.tracker.state_transitions?.on_dispatch_state_id);
+			if (stackParent) {
+				issue = { ...issue, stack_parent: stackParent };
+			}
+			issue = await this.attachPromptComments(issue);
+			startedAt = this.now();
+			runningEntry = {
+				issue,
+				attempt,
+				phase: "PreparingWorkspace",
+				started_at_ms: startedAt,
+				started_at: new Date(startedAt).toISOString(),
+				last_agent_timestamp_ms: null,
+				last_event: "started",
+				last_message: "",
+				turn_count: 0,
+				session_id: null,
+				tokens: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+				workspace: null,
+				workpad_comment_id: null
+			};
+			this.running.set(issue.id, runningEntry);
+			this.dispatching.delete(issue.id);
+			this.log("issue_dispatching", { issue_id: issue.id, issue_identifier: issue.identifier });
 			await this.updateWorkpad(runningEntry, "Preparing workspace");
 			runningEntry.workspace = this.workspaceManager.prepare(issue);
 			issue = this.attachGitHubPromptComments(issue, runningEntry.workspace);
@@ -1458,20 +1468,27 @@ query($owner: String!, $repo: String!, $number: Int!) {
 			this.scheduleRetry(issue, 1, "continuation check", 1000);
 		} catch (error) {
 			const status = error.status || "Failed";
-			runningEntry.phase = status;
+			if (runningEntry) {
+				runningEntry.phase = status;
+			}
 			this.log("issue_run_failed", { issue_id: issue.id, issue_identifier: issue.identifier, status, error: error.message });
-			await this.updateWorkpad(runningEntry, status, error.message);
+			if (runningEntry) {
+				await this.updateWorkpad(runningEntry, status, error.message);
+			}
 			this.scheduleRetry(issue, (attempt || 0) + 1, error.message);
 		} finally {
+			this.dispatching.delete(issue.id);
 			try {
-				if (runningEntry.workspace?.path) {
+				if (runningEntry?.workspace?.path) {
 					this.workspaceManager.runHook("after_run", runningEntry.workspace.path, this.workspaceManager.hookEnv(issue, runningEntry.workspace.path));
 				}
 			} catch (error) {
 				this.log("hook_failed_ignored", { hook: "after_run", issue_id: issue.id, issue_identifier: issue.identifier, error: error.message });
 			}
-			this.agentTotals.seconds_running += (this.now() - startedAt) / 1000;
-			this.running.delete(issue.id);
+			if (runningEntry) {
+				this.agentTotals.seconds_running += (this.now() - startedAt) / 1000;
+				this.running.delete(issue.id);
+			}
 		}
 	}
 
