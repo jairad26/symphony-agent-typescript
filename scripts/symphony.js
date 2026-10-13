@@ -1774,6 +1774,7 @@ function renderWorkpadComment({ marker, issue, entry, status, note = "", generat
 - [ ] Read the target repository AGENTS.md and relevant technical docs.
 - [ ] Keep implementation scoped to this ticket.
 - [ ] Open or update a ready-for-review PR.
+- [ ] Repeat review, repair, validation, and fresh review until task-scoped findings are resolved.
 
 ### Acceptance Criteria
 - [ ] Ticket acceptance criteria are satisfied.
