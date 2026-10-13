@@ -1,6 +1,6 @@
 # Agent Instructions
 
-This file is the target repository's workflow contract for coding agents.
+This file contains guidance for coding agents contributing to the repository.
 
 ## Start Here
 
@@ -19,12 +19,9 @@ This file is the target repository's workflow contract for coding agents.
 7. Wait for CI and review automation.
 8. Read review comments even if CI is green.
 9. Fix actionable comments.
-10. Stop before merge.
 
 ## Commands
 
-- Validate workflow: `node scripts/agent-workflow.js validate`
-- Print workflow instructions: `node scripts/agent-workflow.js instructions`
 - Default check: `npm test`
 
 ## Handoff

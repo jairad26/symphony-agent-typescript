@@ -2,7 +2,7 @@
 
 Symphony Agent's Codex adapter uses `codex exec --json` by default. That is
 enough for the common loop: Linear ticket in, isolated Codex run, PR ready for
-human merge.
+merge.
 
 Codex also ships an experimental app-server:
 

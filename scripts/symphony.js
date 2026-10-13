@@ -1771,10 +1771,9 @@ function renderWorkpadComment({ marker, issue, entry, status, note = "", generat
 - Updated: ${generatedAt}
 
 ### Plan
-- [ ] Follow the target repository workflow contract.
+- [ ] Read the target repository AGENTS.md and relevant technical docs.
 - [ ] Keep implementation scoped to this ticket.
 - [ ] Open or update a ready-for-review PR.
-- [ ] Stop before merge.
 
 ### Acceptance Criteria
 - [ ] Ticket acceptance criteria are satisfied.
