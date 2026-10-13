@@ -13,7 +13,6 @@ Symphony Agent is meant to make agent runs boring and inspectable.
 7. Run the configured agent adapter command.
 8. Stream logs and state to the local server.
 9. If a PR exists, mark it ready and optionally move Linear to review.
-10. Stop before merge.
 
 ## What Symphony Knows
 

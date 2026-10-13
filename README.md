@@ -1,3 +1,6 @@
+> The bundled workflow and repository workflow contracts have been retired.
+> Supply an explicit workflow configuration to use the engine; repository guidance lives in `AGENTS.md`.
+
 # Symphony Agent TypeScript
 
 Symphony Agent TypeScript is a small, standalone TypeScript/Node.js implementation of the Symphony pattern: turning Linear tickets into coding-agent runs against a real git repository. Codex is the default adapter, but the runner can also supervise OpenCode, Claude Code, Cursor CLI, or any generic CLI agent command.
@@ -12,7 +15,7 @@ It does the boring orchestration work:
 - Serves a local dashboard for running, retrying, lifecycle, and token activity.
 - Optionally moves Linear tickets to `In Progress` and `In Review`.
 - Maintains one persistent `## Symphony Workpad` Linear comment per issue.
-- Creates/reuses git worktrees and leaves PRs ready for human merge.
+- Creates/reuses git worktrees and records PR handoff evidence.
 
 ## Requirements
 
@@ -34,12 +37,12 @@ Give your coding agent this prompt:
 
 ```bash
 git clone https://github.com/jairad26/symphony-agent-typescript.git && cd symphony-agent-typescript
-cp .env.example .env.local && $EDITOR .env.local WORKFLOW.md
+cp .env.example .env.local && $EDITOR .env.local /path/to/workflow.md
 ```
 
 ```bash
-npm run validate -- --require-secrets
-npm run serve
+npm run validate -- --workflow /path/to/workflow.md --require-secrets
+npm run serve -- --workflow /path/to/workflow.md
 ```
 
 Edit `.env.local`:
@@ -49,7 +52,7 @@ LINEAR_API_KEY=lin_api_...
 TARGET_REPO_ROOT=~/github.com/acme/my-service
 ```
 
-Edit `WORKFLOW.md`:
+Create your workflow configuration outside this repository:
 
 - `tracker.project_slug`: Linear project slug id.
 - `tracker.assignee_email`: owner filter for tickets the harness may pick up.
@@ -67,22 +70,22 @@ Edit `WORKFLOW.md`:
 Validate:
 
 ```bash
-npm run validate -- --require-secrets
+npm run validate -- --workflow /path/to/workflow.md --require-secrets
 ```
 
-The example `WORKFLOW.md` intentionally fails validation until you replace the
-placeholder Linear project and target repository values.
+Set the Linear project and target repository in that explicit configuration
+before validation.
 
 Run one poll:
 
 ```bash
-npm run once
+npm run once -- --workflow /path/to/workflow.md
 ```
 
 Run continuously:
 
 ```bash
-npm run serve
+npm run serve -- --workflow /path/to/workflow.md
 ```
 
 The server prints a local URL. Visit:
@@ -100,8 +103,6 @@ real work. A harnessed repo should teach agents how to operate through files
 like:
 
 - `AGENTS.md` for human-readable rules and local context.
-- `agent.workflow.json` for branch, PR, CI, review, and handoff policy.
-- `scripts/agent-workflow.js` or similar commands for validating the workflow.
 - `yarn agent:*`, `npm run agent:*`, or equivalent checks that agents can run.
 - Focused diagnostics docs/scripts for production logs, traces, databases,
   search systems, deploys, and cross-repo workflows.
@@ -174,15 +175,13 @@ repo, then tell the Symphony prompt to read it.
 Recommended target repo files:
 
 - `AGENTS.md`: human-readable agent rules.
-- `agent.workflow.json`: machine-readable branch, PR, CI, review, and handoff policy.
-- `scripts/agent-workflow.js`: validates and prints the workflow contract.
 - Review-bot retrigger rules: when to ask automation for a fresh review after
   addressing comments, including a maximum retrigger count per PR.
 - Self-review/performance rules: what the agent must inspect in its own diff
   before handoff, including alternatives considered, measured numbers, and
   added query fan-out or network/database calls.
 
-See `docs/WORKFLOW_CONTRACT.md` and `templates/` for starter files.
+See `templates/AGENTS.md` for repository guidance.
 See `docs/AGENT_ADAPTERS.md` for non-Codex adapter examples. See
 `docs/CODEX_APP_SERVER.md` for why `codex exec --json` is the default Codex
 transport and when app-server is worth adding.
@@ -224,7 +223,6 @@ Running child agent processes do not survive shutdown. A restart means reconcile
 
 - Filter by project and assignee before dispatch.
 - Limit concurrency with `agent.max_concurrent_agents`.
-- Stop before merge.
 - Keep PR handoff explicit.
 - Treat Linear state transitions as best effort.
 
@@ -232,7 +230,6 @@ Running child agent processes do not survive shutdown. A restart means reconcile
 
 ```bash
 npm test
-npm run validate
 ```
 
 The test suite uses Node's built-in test runner and does not require external services.
